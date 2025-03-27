@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import arxiv, os
 import shutil
 import tarfile, os, csv
+import re
 
 def return_acl_paper_titles(year: str):
     '''
@@ -131,10 +132,15 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
                     abstract_str=results[1]
                     fig1_caption_str=results[2]
                     
+                    if fig1_file_paths is not None:
+                        fig1_file_path_str = ";".join(fig1_file_paths)
+                    else:
+                        fig1_file_path_str = None
+
                     rows.append({
                         "paper_title": title,
                         "arxiv_id": id,
-                        "fig1_file_path": fig1_file_path,
+                        "fig1_file_path": fig1_file_path_str,
                         "abstract": abstract_str,
                         "fig1_caption": fig1_caption_str
                     })
@@ -283,4 +289,4 @@ def find_first_figure_abstract_caption(main_tex_path):
     else:
         print("[WARNING] No abstract found in main.tex")
 
-    return image_paths, abstract_str, first_fig_caption
+    return [image_paths, abstract_str, first_fig_caption]
