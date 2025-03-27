@@ -61,7 +61,10 @@ def get_arxiv_id_dict(titles, max_results=10):
                 break
         if title not in paper_dict.keys():
             not_found_titles.append(title)
-    print('❌ Failed to find', len(not_found_titles),'paper ids')
+    if len(not_found_titles) > 0:
+        print('❌ Failed to find', len(not_found_titles),'paper ids')
+    else:
+        print("✅ Found all", len(titles),'papers')
     return paper_dict, not_found_titles
 
 def download_arxiv_source(arxiv_id, save_path):
@@ -90,7 +93,7 @@ def list_top_level_tex_files(folder_path):
 
 def download_latex_files(paper_id_dict, save_dir_path):
     ensure_empty_dir(dir_path=save_dir_path)
-    
+    failed_extract_download=set()
     for paper, id in paper_id_dict.items():
         tar_path=save_dir_path+id+'.tar'
         if download_arxiv_source(arxiv_id=id, save_path=tar_path):
@@ -100,9 +103,14 @@ def download_latex_files(paper_id_dict, save_dir_path):
                 os.remove(tar_path)
                 print(f"✅ {id} Downloaded source to {tar_path}")
             except Exception as e:
+                failed_extract_download.add(paper)
                 print(f"❌ Failed to extract {tar_path}: {e}")
         else:
+            failed_extract_download.add(paper)
             print(f" ❌ {id} Failed to download source.")
+    for paper in list(failed_extract_download):
+        del paper_id_dict[paper]
+    return paper_id_dict
 
 def ensure_empty_dir(dir_path):
     # If it exists, remove it entirely
@@ -113,10 +121,11 @@ def ensure_empty_dir(dir_path):
     os.makedirs(dir_path)
     print('Created directory', dir_path)
 
-def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
-    
+def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separater=';'):
+    success_extractions=[]
     folder='/'.join(csv_path.split('/')[:-1])
     ensure_empty_dir(dir_path=folder)
+    ensure_empty_dir(dir_path=folder+'/img')
     rows = []
     for title, id in paper_id_dict.items():
         folder_path=latex_files_path+'/'+id
@@ -126,17 +135,23 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
         else:
             for tex in tex_files:
                 results = find_first_figure_abstract_caption(main_tex_path=tex)
-                if results is not None:
+                if results[0] is not None and results[1] is not None and results[2] is not None:
                     
                     fig1_file_path=results[0]
                     abstract_str=results[1]
                     fig1_caption_str=results[2]
                     
-                    if fig1_file_path is not None:
-                        fig1_file_path_str = ";".join(fig1_file_path)
-                    else:
-                        fig1_file_path_str = None
+                    
+                    for i in range(len(fig1_file_path)):
+                        fig1_path=fig1_file_path[i]
+                        # Full destination path with new filename
+                        new_filename=id+'_'+str(i)+'.'+fig1_path.split('.')[-1]
+                        destination_path = os.path.join(folder+'/img', new_filename)
 
+                        # Copy and rename the file
+                        shutil.copy2(fig1_path, destination_path)
+                        fig1_file_path[i]=destination_path
+                    fig1_file_path_str = fig1_path_separater.join(fig1_file_path)
                     rows.append({
                         "paper_title": title,
                         "arxiv_id": id,
@@ -144,6 +159,7 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
                         "abstract": abstract_str,
                         "fig1_caption": fig1_caption_str
                     })
+                    success_extractions.append(title)
                     break
 
     # ✅ Save to CSV
@@ -152,7 +168,8 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-    print('✅ Save to CSV', csv_path)
+    print('✅',len(success_extractions),'out of',len(paper_id_dict),'were extracted and saved to CSV', csv_path)
+    return success_extractions
 
 def remove_commented_lines(text):
     """
@@ -220,7 +237,7 @@ def find_first_figure_abstract_caption(main_tex_path):
 
     if not os.path.exists(main_tex_path):
         print(f"[ERROR] main.tex doesn't exist: {main_tex_path}")
-        return None, None, None
+        return [None, None, None]
 
     # 1) Read the file content
     with open(main_tex_path, 'r', encoding='utf-8') as f:
