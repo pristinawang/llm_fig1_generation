@@ -125,7 +125,7 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
             print(f" ❌ {id} Failed to find tex file.")
         else:
             for tex in tex_files:
-                results = find_first_figure_abstract_caption(tex_file_path=tex)
+                results = find_first_figure_abstract_caption(main_tex_path=tex)
                 if results is not None:
                     
                     fig1_file_path=results[0]
@@ -239,7 +239,9 @@ def find_first_figure_abstract_caption(main_tex_path):
     figure_env_match = re.search(figure_env_pattern, tex_content)
 
     image_paths = []
+    full_image_paths = []
     first_fig_caption = None
+    dirname = os.path.dirname(main_tex_path)
 
     if figure_env_match:
         figure_env = figure_env_match.group(1)  # content inside the figure block
@@ -249,10 +251,14 @@ def find_first_figure_abstract_caption(main_tex_path):
         raw_image_paths = re.findall(incl_pattern, figure_env)
         if raw_image_paths:
             image_paths = [path.strip() for path in raw_image_paths]
+            full_image_paths = [
+            os.path.join(dirname, img_path)  # 组合完整路径
+            for img_path in image_paths
+        ]
             print("[INFO] Found image paths in the figure environment:", image_paths)
         else:
             print("[INFO] No \\includegraphics{...} found.")
-            image_paths = None
+            full_image_paths = None
 
         # (A2) Extract the caption via nested-brace parsing
         caption_content, _ = extract_brace_block(figure_env, start_pattern=r'\\caption\s*\{')
@@ -289,4 +295,4 @@ def find_first_figure_abstract_caption(main_tex_path):
     else:
         print("[WARNING] No abstract found in main.tex")
 
-    return [image_paths, abstract_str, first_fig_caption]
+    return [full_image_paths, abstract_str, first_fig_caption]
