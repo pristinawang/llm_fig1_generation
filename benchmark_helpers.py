@@ -132,8 +132,8 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path):
                     abstract_str=results[1]
                     fig1_caption_str=results[2]
                     
-                    if fig1_file_paths is not None:
-                        fig1_file_path_str = ";".join(fig1_file_paths)
+                    if fig1_file_path is not None:
+                        fig1_file_path_str = ";".join(fig1_file_path)
                     else:
                         fig1_file_path_str = None
 
