@@ -1,3 +1,5 @@
 requests==2.31.0
 arxiv==1.4.7
 beautifulsoup4==4.12.3
+pylatexenc==2.10
+plasTeX==3.1

@@ -4,6 +4,100 @@ import arxiv, os
 import shutil
 import tarfile, os, csv
 import re
+from plasTeX.TeX import TeX
+from pylatexenc.latex2text import LatexNodes2Text
+
+
+
+import os
+from plasTeX.TeX import TeX
+from plasTeX.Base import LaTeX
+from pylatexenc.latex2text import LatexNodes2Text
+
+def extract_latex_info(latex_path):
+
+    # Read LaTeX content
+    with open(latex_path, 'r', encoding='utf-8') as f:
+        tex_str = f.read()
+
+
+    # Parse using plasTeX
+    tex = TeX()
+    tex.input(tex_str)
+    doc = tex.parse()
+
+    result = {}
+
+    # --- Extract abstract node ---
+    abstract_node = None
+    for node in doc.getElementsByTagName("abstract"):
+        abstract_node = node
+        break
+    if abstract_node:
+        # print('----Child source----------')
+        # for i,child in enumerate(abstract_node.allChildNodes):
+        #     if hasattr(child, 'source'): 
+        #         print(i)
+        #         print(child.source)
+        # print('----Child source----------')
+        # raw_abstract = ''.join([child.source for child in abstract_node.allChildNodes if hasattr(child, 'source')])
+        # print('Raw abstract')
+        # print(raw_abstract)
+        # print('----')
+        result["abstract"] = LatexNodes2Text().latex_to_text(abstract_node.source).strip()
+        # try:
+        #     result["abstract"] = LatexNodes2Text().latex_to_text(raw_abstract).strip()
+        # except Exception:
+            
+        #     return None
+    else: return None
+
+    # --- Extract first figure node ---
+    figure_node = None
+    for fig in doc.getElementsByTagName("figure"):
+        figure_node = fig
+        break
+    if figure_node:
+        includes = figure_node.getElementsByTagName("includegraphics")
+        image_paths = [img.attributes.get("file", "") for img in includes if img.attributes.get("file", "")]
+        if len(image_paths) != 1:
+            return None  # Must have exactly one image
+        result["image_path"] = image_paths[0]
+
+        captions = figure_node.getElementsByTagName("caption")
+        if captions:
+            # print('-----caption-----')
+            # for child in captions[0].allChildNodes:
+            #     if hasattr(child, 'source'):
+            #         print(child.source)
+            # print('-----caption-----')
+            raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
+            result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
+        else:
+            return None # Must have caption
+    else: return None
+    return result
+    # --- Extract \section{Introduction} ---
+    intro_node = None
+    for sec in doc.getElementsByTagName("section"):
+        title = getattr(sec, 'title', None)
+        title_str = getattr(title, 'textContent', '') if title else ''
+        if 'introduction' in title_str.lower():
+            intro_node = sec
+            break
+    if intro_node:
+        raw_intro = ''.join([child.source for child in intro_node.allChildNodes if hasattr(child, 'source')])
+        result["introduction"] = LatexNodes2Text().latex_to_text(raw_intro).strip()
+        # try:
+        #     result["introduction"] = LatexNodes2Text().latex_to_text(raw_intro).strip()
+        # except Exception:
+        #     return None
+
+    return result
+
+
+
+
 
 def return_acl_paper_titles(year: str):
     '''
@@ -134,8 +228,21 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
             print(f" ❌ {id} Failed to find tex file.")
         else:
             for tex in tex_files:
-                results = find_first_figure_abstract_caption(main_tex_path=tex)
-                if results[0] is not None and results[1] is not None and results[2] is not None:
+                results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
+                if results is not None:
+                    print('TESTEST')
+                    for k,v in results.items():
+                        print('-------------------------')
+                        print(k, ':')
+                        print(v)
+                        print('-------------------------')
+                    # {
+                    #     "abstract": abstract_text,
+                    #     "introduction": intro_text,
+                    #     "figure1_path": figure_paths[0],
+                    #     "figure1_caption": figure_caption,
+                    # }
+                #if results[0] is not None and results[1] is not None and results[2] is not None:
                     
                     fig1_file_path=results[0]
                     abstract_str=results[1]
@@ -221,6 +328,50 @@ def extract_brace_block(tex, start_pattern=r'\\caption\s*\{'):
     content = tex[start_idx : i-1]
     return content, i
 
+def extract_latex_content(latex_path):
+    results={}
+    try:
+        with open(latex_path, 'r', encoding='utf-8') as f:
+            str_tex = f.read()
+    except Exception as e:
+        print(f"Error reading file: {latex_path}\n{e}")
+        return None
+    print('------------------------------------------------')
+    pattern = re.compile(r'\\newcommand\{(\\\w+)\}\[0\]\{(.+?)\}', re.DOTALL)
+
+    for match in pattern.findall(str_tex):
+        macro, definition = match
+        print(macro, definition)
+    print('----------------------------------')
+    # 1. Extract \begin{abstract}...\end{abstract}
+    abstract_match = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", str_tex, re.DOTALL)
+    if abstract_match:
+        abstract_tex = abstract_match.group(1).strip()
+    else: return None
+
+
+    # 2. Extract content of \section{Introduction} up to next \section{
+    intro_match = re.search(r"\\section\{[ ]*Introduction[ ]*\}(.*?)(?=\\section\{)", str_tex, re.DOTALL | re.IGNORECASE)
+    if intro_match: intro_tex = intro_match.group(1).strip()
+    else: return None
+    
+
+    # 3. Extract \begin{figure}...\end{figure}
+    figure_match = re.search(r"\\begin\{figure\}(.*?)\\end\{figure\}", str_tex, re.DOTALL)
+    if figure_match: figure_tex = figure_match.group(1).strip()
+    else: return None
+    
+    return results
+    
+def clean_latex_to_text(latex_str):
+    
+    pass
+def clean_latex_to_text(latex_str):
+    """
+    Converts raw LaTeX string to clean readable text using pylatexenc.
+    """
+    return LatexNodes2Text().latex_to_text(latex_str).strip()
+
 def find_first_figure_abstract_caption(main_tex_path):
     """
     Reads a LaTeX file, removes fully commented lines, then searches for:
@@ -237,7 +388,7 @@ def find_first_figure_abstract_caption(main_tex_path):
 
     if not os.path.exists(main_tex_path):
         print(f"[ERROR] main.tex doesn't exist: {main_tex_path}")
-        return [None, None, None]
+        return None#[None, None, None]
 
     # 1) Read the file content
     with open(main_tex_path, 'r', encoding='utf-8') as f:
@@ -271,10 +422,15 @@ def find_first_figure_abstract_caption(main_tex_path):
             full_image_paths = [
             os.path.join(dirname, img_path)  # 组合完整路径
             for img_path in image_paths
-        ]
-            print("[INFO] Found image paths in the figure environment:", image_paths)
+            ]
+            if len(full_image_paths)>1: 
+                print("[INFO] More than one fig in fig1", image_paths)
+                return None   
+            fig1_full_image_path = full_image_paths[0]
+            print("[INFO] Found image path in the figure environment:", fig1_full_image_path)
         else:
             print("[INFO] No \\includegraphics{...} found.")
+            return None
             full_image_paths = None
 
         # (A2) Extract the caption via nested-brace parsing
@@ -288,9 +444,11 @@ def find_first_figure_abstract_caption(main_tex_path):
             first_fig_caption = clean_cap
             print(f"[INFO] Found figure caption: {first_fig_caption}")
         else:
+            return None
             first_fig_caption = None
             print("[INFO] No \\caption{...} found in this figure block.")
     else:
+        return None
         image_paths = None
         first_fig_caption = None
         print("[WARNING] No figure environment found in main.tex")
@@ -301,15 +459,23 @@ def find_first_figure_abstract_caption(main_tex_path):
     abstract_match = re.search(abstract_pattern, tex_content, flags=re.DOTALL)
     if abstract_match:
         raw_abs = abstract_match.group(1)
-        # Optionally remove some LaTeX commands from the abstract:
-        raw_abs = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', raw_abs)
+        abstract_str = clean_latex_to_text(raw_abs) # needs try block
+        
+        # raw_abs = abstract_match.group(1)
+        # # Optionally remove some LaTeX commands from the abstract:
+        # raw_abs = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', raw_abs)
 
-        raw_abs = re.sub(r'\\[A-Za-z]+\{.*?\}', '', raw_abs)
-        raw_abs = re.sub(r'\\[A-Za-z]+', '', raw_abs)
-        raw_abs = re.sub(r'\s+', ' ', raw_abs).strip()
-        abstract_str = raw_abs
-        print("[INFO] Found abstract:", abstract_str)
+        # raw_abs = re.sub(r'\\[A-Za-z]+\{.*?\}', '', raw_abs)
+        # raw_abs = re.sub(r'\\[A-Za-z]+', '', raw_abs)
+        # raw_abs = re.sub(r'\s+', ' ', raw_abs).strip()
+        # abstract_str = raw_abs
+        # print("[INFO] Found abstract:", abstract_str)
     else:
+        return None
         print("[WARNING] No abstract found in main.tex")
-
+    return {
+        "fig1_path": fig1_full_image_path,
+        "abstract": abstract_str,
+        "fig1_caption": first_fig_caption
+    }
     return [full_image_paths, abstract_str, first_fig_caption]
