@@ -3,99 +3,25 @@ from bs4 import BeautifulSoup
 import arxiv, os
 import shutil
 import tarfile, os, csv
-import re
+import re, json
 from plasTeX.TeX import TeX
 from pylatexenc.latex2text import LatexNodes2Text
 
+from plasTeX.Packages.xcolor import ColorError
 
+from textacy import preprocessing
+import spacy
 
+from pylatexenc.latexwalker import LatexWalker
 import os
 from plasTeX.TeX import TeX
 from plasTeX.Base import LaTeX
 from pylatexenc.latex2text import LatexNodes2Text
 
-def extract_latex_info(latex_path):
 
-    # Read LaTeX content
-    with open(latex_path, 'r', encoding='utf-8') as f:
-        tex_str = f.read()
-
-
-    # Parse using plasTeX
-    tex = TeX()
-    tex.input(tex_str)
-    doc = tex.parse()
-
-    result = {}
-
-    # --- Extract abstract node ---
-    abstract_node = None
-    for node in doc.getElementsByTagName("abstract"):
-        abstract_node = node
-        break
-    if abstract_node:
-        # print('----Child source----------')
-        # for i,child in enumerate(abstract_node.allChildNodes):
-        #     if hasattr(child, 'source'): 
-        #         print(i)
-        #         print(child.source)
-        # print('----Child source----------')
-        # raw_abstract = ''.join([child.source for child in abstract_node.allChildNodes if hasattr(child, 'source')])
-        # print('Raw abstract')
-        # print(raw_abstract)
-        # print('----')
-        result["abstract"] = LatexNodes2Text().latex_to_text(abstract_node.source).strip()
-        # try:
-        #     result["abstract"] = LatexNodes2Text().latex_to_text(raw_abstract).strip()
-        # except Exception:
-            
-        #     return None
-    else: return None
-
-    # --- Extract first figure node ---
-    figure_node = None
-    for fig in doc.getElementsByTagName("figure"):
-        figure_node = fig
-        break
-    if figure_node:
-        includes = figure_node.getElementsByTagName("includegraphics")
-        image_paths = [img.attributes.get("file", "") for img in includes if img.attributes.get("file", "")]
-        if len(image_paths) != 1:
-            return None  # Must have exactly one image
-        result["image_path"] = image_paths[0]
-
-        captions = figure_node.getElementsByTagName("caption")
-        if captions:
-            # print('-----caption-----')
-            # for child in captions[0].allChildNodes:
-            #     if hasattr(child, 'source'):
-            #         print(child.source)
-            # print('-----caption-----')
-            raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
-            result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
-        else:
-            return None # Must have caption
-    else: return None
-    return result
-    # --- Extract \section{Introduction} ---
-    intro_node = None
-    for sec in doc.getElementsByTagName("section"):
-        title = getattr(sec, 'title', None)
-        title_str = getattr(title, 'textContent', '') if title else ''
-        if 'introduction' in title_str.lower():
-            intro_node = sec
-            break
-    if intro_node:
-        raw_intro = ''.join([child.source for child in intro_node.allChildNodes if hasattr(child, 'source')])
-        result["introduction"] = LatexNodes2Text().latex_to_text(raw_intro).strip()
-        # try:
-        #     result["introduction"] = LatexNodes2Text().latex_to_text(raw_intro).strip()
-        # except Exception:
-        #     return None
-
-    return result
-
-
+from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
+from pylatexenc import latexwalker, latex2text, macrospec
+from pylatexenc.latex2text import get_default_latex_context_db
 
 
 
@@ -117,10 +43,10 @@ def return_acl_paper_titles(year: str):
         a_tag = strong.find("a", class_="align-middle")
         if a_tag:
             titles.append(a_tag.text.strip())
-    print('Extracted', len(titles[1:]), 'paper titles from', year)
+    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
     return titles[1:]
 
-def get_arxiv_id_dict(titles, max_results=10):
+def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.json"):
     '''
     input:
     list of titles, list of str
@@ -130,7 +56,19 @@ def get_arxiv_id_dict(titles, max_results=10):
     paper_dict: dict, key is paper title, value is arxiv paper id
     not_found_titles: list of not found paper titles, list of str
     '''
-    paper_dict={}
+    if os.path.exists(arxiv_id_db_path):
+        with open(arxiv_id_db_path, "r") as f:
+            paper_dict = json.load(f)
+    else:
+        paper_dict = {}
+    
+    not_in_db_titles=[]
+    for title in titles:
+        if not(title in paper_dict): not_in_db_titles.append(title)
+    print("🔍 Found", len(titles)-len(not_in_db_titles),"out of",len(titles), "ids in database", arxiv_id_db_path)
+    if len(not_in_db_titles)>0: print('Start searching for the remaining', len(not_in_db_titles), "ids")
+    titles=not_in_db_titles
+    
     not_found_titles=[]
     client = arxiv.Client()
     for i,title in enumerate(titles):
@@ -142,14 +80,8 @@ def get_arxiv_id_dict(titles, max_results=10):
         )
 
         results = list(client.results(search))
-        # print(f"🔍 Found {len(results)} result(s):")
-
+        
         for result in results:
-            # print("=" * 50)
-            # print("Title:", result.title)
-            # print("arXiv ID:", result.get_short_id())
-            # print("URL:", result.entry_id)
-            # print("Published:", result.published.date())
             if result.title == title:
                 paper_dict[title]=result.get_short_id()
                 break
@@ -157,8 +89,10 @@ def get_arxiv_id_dict(titles, max_results=10):
             not_found_titles.append(title)
     if len(not_found_titles) > 0:
         print('❌ Failed to find', len(not_found_titles),'paper ids')
-    else:
+    elif len(titles)>0:
         print("✅ Found all", len(titles),'papers')
+    with open(arxiv_id_db_path, "w") as f:
+        json.dump(paper_dict, f)
     return paper_dict, not_found_titles
 
 def download_arxiv_source(arxiv_id, save_path):
@@ -174,7 +108,6 @@ def download_arxiv_source(arxiv_id, save_path):
             f.write(response.content)
         return True
     else:
-        #print(f" ❌ {id} Failed to download source. Status code: {response.status_code}")
         return False
 
 def list_top_level_tex_files(folder_path):
@@ -186,22 +119,34 @@ def list_top_level_tex_files(folder_path):
     return tex_files
 
 def download_latex_files(paper_id_dict, save_dir_path):
-    ensure_empty_dir(dir_path=save_dir_path)
+    subdirs=[]
+    if os.path.exists(save_dir_path):
+        subdirs = [d for d in os.listdir(save_dir_path) if os.path.isdir(os.path.join(save_dir_path, d))]
+    else: ensure_empty_dir(dir_path=save_dir_path)
+    if len(subdirs)>0: 
+        print("🔍 Found", len(subdirs),"papers' tex source and downloading the rest...")
+        download_paper_id_dict={}
+        for title, id in paper_id_dict.items():
+            if not(id in subdirs):
+                download_paper_id_dict[title]=id
+        #paper_id_dict=new_paper_id_dict
+    
     failed_extract_download=set()
-    for paper, id in paper_id_dict.items():
+    for paper, id in download_paper_id_dict.items():
         tar_path=save_dir_path+id+'.tar'
         if download_arxiv_source(arxiv_id=id, save_path=tar_path):
             try:
                 with tarfile.open(tar_path, "r:gz") as tar:
                     tar.extractall(path=save_dir_path+id)
                 os.remove(tar_path)
-                print(f"✅ {id} Downloaded source to {tar_path}")
+                print(f"{id} Downloaded and extracted source to {tar_path}")
             except Exception as e:
                 failed_extract_download.add(paper)
                 print(f"❌ Failed to extract {tar_path}: {e}")
         else:
             failed_extract_download.add(paper)
             print(f" ❌ {id} Failed to download source.")
+    if len(download_paper_id_dict)-len(failed_extract_download)>0: print('✅', len(download_paper_id_dict)-len(failed_extract_download),"out of", len(download_paper_id_dict), "have been downloaded and extracted to", save_dir_path)
     for paper in list(failed_extract_download):
         del paper_id_dict[paper]
     return paper_id_dict
@@ -227,50 +172,40 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
         if len(tex_files)==0:
             print(f" ❌ {id} Failed to find tex file.")
         else:
-            for tex in tex_files:
-                results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
-                if results is not None:
-                    print('TESTEST')
-                    for k,v in results.items():
-                        print('-------------------------')
-                        print(k, ':')
-                        print(v)
-                        print('-------------------------')
-                    # {
-                    #     "abstract": abstract_text,
-                    #     "introduction": intro_text,
-                    #     "figure1_path": figure_paths[0],
-                    #     "figure1_caption": figure_caption,
-                    # }
-                #if results[0] is not None and results[1] is not None and results[2] is not None:
-                    
-                    fig1_file_path=results[0]
-                    abstract_str=results[1]
-                    fig1_caption_str=results[2]
-                    
-                    
-                    for i in range(len(fig1_file_path)):
-                        fig1_path=fig1_file_path[i]
-                        # Full destination path with new filename
-                        new_filename=id+'_'+str(i)+'.'+fig1_path.split('.')[-1]
-                        destination_path = os.path.join(folder+'/img', new_filename)
 
-                        # Copy and rename the file
-                        shutil.copy2(fig1_path, destination_path)
-                        fig1_file_path[i]=destination_path
-                    fig1_file_path_str = fig1_path_separater.join(fig1_file_path)
+            for tex in tex_files:
+                try:
+                    results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
+                except Exception as e:
+                    results=None
+                    print("❌ [extract tex ERROR]",e)
+                if results is not None:
+
+                    fig1_file_path=os.path.join(folder_path, results['image_path'] )
+                    introduction_str=results['introduction']
+                    abstract_str=results['abstract']
+                    fig1_caption_str=results['figure_caption']
+                    
+
+                    # Copy img to new path
+                    new_filename=id + os.path.splitext(fig1_file_path)[1] 
+                    destination_path = os.path.join(folder+'/img', new_filename)
+                    shutil.copy2(fig1_file_path, destination_path)
+                    fig1_file_path=destination_path
+                    
                     rows.append({
                         "paper_title": title,
                         "arxiv_id": id,
-                        "fig1_file_path": fig1_file_path_str,
                         "abstract": abstract_str,
-                        "fig1_caption": fig1_caption_str
+                        "fig1_file_path": fig1_file_path,
+                        "fig1_caption": fig1_caption_str,
+                        "introduction": introduction_str
                     })
                     success_extractions.append(title)
                     break
 
     # ✅ Save to CSV
-    fieldnames = ["paper_title", "arxiv_id", "fig1_file_path", "abstract", "fig1_caption"]
+    fieldnames = ["paper_title", "arxiv_id", "fig1_file_path", "fig1_caption", "abstract", "introduction"]
     with open(csv_path, mode="w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -328,49 +263,42 @@ def extract_brace_block(tex, start_pattern=r'\\caption\s*\{'):
     content = tex[start_idx : i-1]
     return content, i
 
-def extract_latex_content(latex_path):
-    results={}
-    try:
-        with open(latex_path, 'r', encoding='utf-8') as f:
-            str_tex = f.read()
-    except Exception as e:
-        print(f"Error reading file: {latex_path}\n{e}")
-        return None
-    print('------------------------------------------------')
-    pattern = re.compile(r'\\newcommand\{(\\\w+)\}\[0\]\{(.+?)\}', re.DOTALL)
+# def extract_latex_content(latex_path):
+#     results={}
+#     try:
+#         with open(latex_path, 'r', encoding='utf-8') as f:
+#             str_tex = f.read()
+#     except Exception as e:
+#         print(f"Error reading file: {latex_path}\n{e}")
+#         return None
+#     print('------------------------------------------------')
+#     pattern = re.compile(r'\\newcommand\{(\\\w+)\}\[0\]\{(.+?)\}', re.DOTALL)
 
-    for match in pattern.findall(str_tex):
-        macro, definition = match
-        print(macro, definition)
-    print('----------------------------------')
-    # 1. Extract \begin{abstract}...\end{abstract}
-    abstract_match = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", str_tex, re.DOTALL)
-    if abstract_match:
-        abstract_tex = abstract_match.group(1).strip()
-    else: return None
+#     for match in pattern.findall(str_tex):
+#         macro, definition = match
+#         print(macro, definition)
+#     print('----------------------------------')
+#     # 1. Extract \begin{abstract}...\end{abstract}
+#     abstract_match = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", str_tex, re.DOTALL)
+#     if abstract_match:
+#         abstract_tex = abstract_match.group(1).strip()
+#     else: return None
 
 
-    # 2. Extract content of \section{Introduction} up to next \section{
-    intro_match = re.search(r"\\section\{[ ]*Introduction[ ]*\}(.*?)(?=\\section\{)", str_tex, re.DOTALL | re.IGNORECASE)
-    if intro_match: intro_tex = intro_match.group(1).strip()
-    else: return None
+#     # 2. Extract content of \section{Introduction} up to next \section{
+#     intro_match = re.search(r"\\section\{[ ]*Introduction[ ]*\}(.*?)(?=\\section\{)", str_tex, re.DOTALL | re.IGNORECASE)
+#     if intro_match: intro_tex = intro_match.group(1).strip()
+#     else: return None
     
 
-    # 3. Extract \begin{figure}...\end{figure}
-    figure_match = re.search(r"\\begin\{figure\}(.*?)\\end\{figure\}", str_tex, re.DOTALL)
-    if figure_match: figure_tex = figure_match.group(1).strip()
-    else: return None
+#     # 3. Extract \begin{figure}...\end{figure}
+#     figure_match = re.search(r"\\begin\{figure\}(.*?)\\end\{figure\}", str_tex, re.DOTALL)
+#     if figure_match: figure_tex = figure_match.group(1).strip()
+#     else: return None
     
-    return results
-    
-def clean_latex_to_text(latex_str):
-    
-    pass
-def clean_latex_to_text(latex_str):
-    """
-    Converts raw LaTeX string to clean readable text using pylatexenc.
-    """
-    return LatexNodes2Text().latex_to_text(latex_str).strip()
+#     return results
+
+
 
 def find_first_figure_abstract_caption(main_tex_path):
     """
@@ -479,3 +407,287 @@ def find_first_figure_abstract_caption(main_tex_path):
         "fig1_caption": first_fig_caption
     }
     return [full_image_paths, abstract_str, first_fig_caption]
+
+def has_extension(path):
+    return os.path.splitext(path)[1] != ''  # e.g. returns '.png' → True
+
+
+def resolve_image_path(base_path, search_dir):
+    image_extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.eps']
+
+    subdir = os.path.dirname(base_path)
+    base_name, requested_ext = os.path.splitext(os.path.basename(base_path))
+
+    search_path = os.path.join(search_dir, subdir)
+
+    if not os.path.isdir(search_path):
+        return None
+
+    # Look for exact match (case-insensitive, even with extension)
+    for filename in os.listdir(search_path):
+        name_no_ext, ext = os.path.splitext(filename)
+        if (
+            name_no_ext.lower() == base_name.lower() and
+            ext.lower() in image_extensions
+        ):
+            return os.path.join(subdir, filename)
+
+    return None
+
+# def resolve_image_path(base_path, search_dir):
+#     image_extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.eps']
+    
+#     subdir = os.path.dirname(base_path)
+#     base_name = os.path.basename(base_path)
+
+#     search_path = os.path.join(search_dir, subdir)
+
+#     if not os.path.isdir(search_path):
+#         return None
+
+#     # List files in the directory and look for case-insensitive match
+#     for filename in os.listdir(search_path):
+#         name_no_ext, ext = os.path.splitext(filename)
+#         if name_no_ext.lower() == base_name.lower() and ext.lower() in image_extensions:
+#             print('--FILE NAME', os.path.join(subdir, filename))
+#             return os.path.join(subdir, filename)
+
+#     return None
+
+def extract_latex_info(latex_path):
+
+    # Read LaTeX content
+    with open(latex_path, 'r', encoding='utf-8') as f:
+        tex_str = f.read()
+
+    ## Remove tables
+    tex_str = re.sub(r'\\begin\{table\*?\}.*?\\end\{table\*?\}', '', tex_str, flags=re.DOTALL)
+    
+    # print('---------DEBUG tex str')
+    
+    # print(tex_str)
+    # print('----------')
+    # Parse using plasTeX
+    
+    tex = TeX()
+    try:
+        tex.input(tex_str)
+        doc = tex.parse()
+    except ColorError as ce:
+        tex_str = re.sub(r'\\definecolor\{.*?\}\{HTML\}\{.*?\}', '', tex_str)
+        tex.input(tex_str)
+        doc = tex.parse()
+    except Exception as e:
+        
+        print("❌ [Parse tex ERROR]",e)
+        return None
+
+    result = {}
+    # --- Extract abstract node ---
+    abstract_node = None
+    for node in doc.getElementsByTagName("abstract"):
+        abstract_node = node
+        break
+    if abstract_node:
+        # print('----Child source----------')
+        # for i,child in enumerate(abstract_node.allChildNodes):
+        #     if hasattr(child, 'source'): 
+        #         print(i)
+        #         print(child.source)
+        # print('----Child source----------')
+
+        # print('----')
+        # print('Prev')
+        # print(abstract_node.source)
+        # print('----')
+        latex=extract_latex_text_without_figures(abstract_node)
+        # print('Raw abstract')
+        # print(latex)
+        # print('----')
+        raw_text = custom_latex_to_text(latex)
+        norm_text = enforce_spacing(raw_text)
+        result["abstract"] = norm_text
+
+        
+    else: return None # No abstract node found
+    # print(result)
+    # print('-----HERE??')
+    
+    # --- Extract first figure node ---
+    figure_node = None
+    for fig in doc.getElementsByTagName("figure"):
+        figure_node = fig
+        break
+    if figure_node:
+        includes = figure_node.getElementsByTagName("includegraphics")
+        image_paths = [img.attributes.get("file", "") for img in includes if img.attributes.get("file", "")]
+        if len(image_paths) != 1:
+            return None  # Must have exactly one image
+
+        raw_image_path = image_paths[0]
+
+        resolved_path = resolve_image_path(raw_image_path, search_dir=os.path.dirname(latex_path))
+        if not resolved_path:
+            return None
+        result["image_path"] = resolved_path
+        
+
+
+
+        captions = figure_node.getElementsByTagName("caption")
+        if captions:
+            # print('-----caption-----')
+            # for child in captions[0].allChildNodes:
+            #     if hasattr(child, 'source'):
+            #         print(child.source)
+            # print('-----caption-----')
+            raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
+            result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
+        else:
+            return None # Must have caption
+    else: return None # No figure node found
+    # print(result)
+    
+    # --- Extract \section{Introduction} ---
+    intro_node = None
+    for sec in doc.getElementsByTagName("section"):
+        title = getattr(sec, 'title', None)
+        title_str = getattr(title, 'textContent', '') if title else ''
+        if 'introduction' in title_str.lower():
+            intro_node = sec
+            break
+    if intro_node:
+        # test=[]
+        # test.append(intro_node.source)
+        # print('-------INTRO-------------------')
+        # print(test)
+
+        # print('-------INTRO DEBUG-------------------')
+        # test=[]
+        
+        latex=extract_latex_text_without_figures(intro_node)
+        # test.append(latex)
+        # print('----')
+        # print('Raw')
+        # print(test)
+        # print('----')
+        # list_macros_and_args(latex)
+        raw_text = custom_latex_to_text(latex)
+        # test=[]
+        # test.append(raw_text)
+        # print('----')
+        # print('Raw text')
+        # print(test)
+        # print('----')
+        norm_text = enforce_spacing(raw_text)
+        # test=[]
+        # test.append(norm_text)
+        # print('----')
+        # print('Norm Text')
+        # print(test)
+        # print('----')
+        result["introduction"] = norm_text
+    else: return None # No introduction node extraced
+
+    return result
+
+def custom_latex_to_text(latex):
+    specs_db = get_default_latex_context_db()
+    custom_specs = {
+        'macros': [
+            # MacroTextSpec('textit', discard=False),
+            MacroTextSpec('texttt', discard=False),  # keep contents
+            MacroTextSpec('footnote', discard=True),
+            MacroTextSpec('ref', discard=True),
+            MacroTextSpec('autoref', discard=True),
+            MacroTextSpec('cref', discard=True),
+            MacroTextSpec('Cref', discard=True),
+            MacroTextSpec('eqref', discard=True),
+            MacroTextSpec('cite', discard=True),
+            MacroTextSpec('citet', discard=True),
+            MacroTextSpec('citep', discard=True),
+        ]
+    }
+
+    specs_db.add_context_category('custom_specs',prepend=True, macros=custom_specs['macros'])
+    return LatexNodes2Text(latex_context=specs_db).latex_to_text(latex).strip()
+
+
+
+
+def contains_figure(node):
+        # Recursively check if node or any of its children is a figure or figure*
+        tag = getattr(node, 'tagName', '')
+        if tag in {'figure', 'figure*'}:
+            return True
+        return any(contains_figure(child) for child in getattr(node, 'childNodes', []))
+    
+
+def extract_latex_text_without_figures(node, delimiter=''):
+    latex_parts = []
+
+    for child in getattr(node, 'childNodes', []):
+        if contains_figure(child):
+            continue
+        latex_parts.append(child.source)
+
+    # Combine LaTeX source and convert to plain text
+    full_latex = delimiter.join(latex_parts)
+    return full_latex
+        
+
+
+def list_macros_and_args(latex_str):
+    walker = LatexWalker(latex_str)
+    nodes, parsing_errors, _ = walker.get_latex_nodes()
+
+    def walk(nodes):
+        for n in nodes:
+            if hasattr(n, 'macroname'):
+                args = getattr(n.nodeargd, 'argnlist', [])
+                print(f"Macro: \\{n.macroname}  | Args: {len(args)}")
+            if hasattr(n, 'nodelist'):
+                walk(n.nodelist)
+            if hasattr(n, 'nodeargd'):
+                for arg in getattr(n.nodeargd, 'argnlist', []):
+                    if hasattr(arg, 'nodelist'):
+                        walk(arg.nodelist)
+
+    walk(nodes)
+
+nlp = spacy.load("en_core_web_sm")
+
+def enforce_spacing(text):
+    doc = nlp(text)
+    text = preprocessing.normalize.whitespace(doc.text)
+    text = preprocessing.normalize.quotation_marks(text)
+    text = preprocessing.normalize.hyphenated_words(text)
+
+    # Normalize quotation marks (basic double/single quote spacing)
+    text = re.sub(r'\s*"\s*([^"]*?)\s*"\s*', r' "\1" ', text)  # Space around quoted text
+    text = re.sub(r"\s*'\s*([^']*?)\s*'\s*", r" '\1' ", text)  # Same for single quotes
+
+    # Fix spacing around brackets and parentheses, including angle brackets
+    text = re.sub(r'\s*([(\[\{<])\s*', r' \1', text)  # Space before opening brackets
+    text = re.sub(r'\s*([)\]\}>])\s*', r'\1 ', text)  # Space after closing brackets
+
+    # --- Math-aware punctuation handling ---
+
+    # Preserve commas/periods between digits (e.g., 12.34, 1,000)
+    text = re.sub(r'(?<=\d)\s*([.,])\s*(?=\d)', r'\1', text)
+
+    # Preserve factorial, percent, and exponentiation notation (e.g., 5!, 20%, 2^3)
+    text = re.sub(r'(?<=\d)\s*([!%^])\s*', r'\1', text)
+
+    # Remove space before general punctuation (only outside math cases)
+    text = re.sub(r'\s+([,.!?;:])', r'\1', text)
+
+    # Add space after punctuation, only if NOT followed by whitespace or digit (to avoid 12.34 → 12. 34)
+    text = re.sub(r'([,.!?;:])(?=[^\s\d])', r'\1 ', text)
+    
+    # Normalize Latin abbreviations like e. g. , → e.g., or E. G. , → E.G.,
+    text = re.sub(r'\b([eE])\s*\.\s*([gG])\s*\.\s*,?', r'\1.\2.,', text)
+    text = re.sub(r'\b([iI])\s*\.\s*([eE])\s*\.\s*,?', r'\1.\2.,', text)
+
+
+    return text
