@@ -67,12 +67,12 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
         if not(title in paper_dict): not_in_db_titles.append(title)
     print("🔍 Found", len(titles)-len(not_in_db_titles),"out of",len(titles), "ids in database", arxiv_id_db_path)
     if len(not_in_db_titles)>0: print('Start searching for the remaining', len(not_in_db_titles), "ids")
-    titles=not_in_db_titles
+    #titles=not_in_db_titles
     
     not_found_titles=[]
     client = arxiv.Client()
-    for i,title in enumerate(titles):
-        print(f"Searching for paper {i+1} of {len(titles)}")
+    for i,title in enumerate(not_in_db_titles):
+        print(f"Searching for paper {i+1} of {len(not_in_db_titles)}")
         search = arxiv.Search(
             query=title,
             max_results=max_results,
@@ -89,11 +89,15 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
             not_found_titles.append(title)
     if len(not_found_titles) > 0:
         print('❌ Failed to find', len(not_found_titles),'paper ids')
-    elif len(titles)>0:
-        print("✅ Found all", len(titles),'papers')
+    elif len(not_in_db_titles)>0:
+        print("✅ Found all", len(not_in_db_titles),'papers')
     with open(arxiv_id_db_path, "w") as f:
         json.dump(paper_dict, f)
-    return paper_dict, not_found_titles
+    extracting_paper_dict={}
+    for title in titles:
+        if title in paper_dict:
+            extracting_paper_dict[title]=paper_dict[title]
+    return extracting_paper_dict, not_found_titles
 
 def download_arxiv_source(arxiv_id, save_path):
     '''
@@ -123,13 +127,18 @@ def download_latex_files(paper_id_dict, save_dir_path):
     if os.path.exists(save_dir_path):
         subdirs = [d for d in os.listdir(save_dir_path) if os.path.isdir(os.path.join(save_dir_path, d))]
     else: ensure_empty_dir(dir_path=save_dir_path)
-    if len(subdirs)>0: 
-        print("🔍 Found", len(subdirs),"papers' tex source and downloading the rest...")
+    # print(subdirs)
+    # print(list(paper_id_dict.keys()))
+    overlap = set(subdirs) & set(list(paper_id_dict.values()))
+    if len(overlap)>0: 
+        print("🔍 Found tex source of", len(overlap),"out of",len(paper_id_dict),"papers")
         download_paper_id_dict={}
         for title, id in paper_id_dict.items():
             if not(id in subdirs):
                 download_paper_id_dict[title]=id
-        #paper_id_dict=new_paper_id_dict
+    else:
+        download_paper_id_dict=paper_id_dict
+    if len(download_paper_id_dict)>0: print("Start downloading and extracting the remaining", len(download_paper_id_dict), "papers")
     
     failed_extract_download=set()
     for paper, id in download_paper_id_dict.items():
@@ -463,6 +472,10 @@ def extract_latex_info(latex_path):
     ## Remove tables
     tex_str = re.sub(r'\\begin\{table\*?\}.*?\\end\{table\*?\}', '', tex_str, flags=re.DOTALL)
     
+    # Replace figure* environments with figure
+    tex_str = re.sub(r'\\begin\{figure\*\}', r'\\begin{figure}', tex_str)
+    tex_str = re.sub(r'\\end\{figure\*\}', r'\\end{figure}', tex_str)
+    
     # print('---------DEBUG tex str')
     
     # print(tex_str)
@@ -513,7 +526,7 @@ def extract_latex_info(latex_path):
     # print(result)
     # print('-----HERE??')
     
-    # --- Extract first figure node ---
+    # --- Extract first figure node ---    
     figure_node = None
     for fig in doc.getElementsByTagName("figure"):
         figure_node = fig
