@@ -476,6 +476,10 @@ def extract_latex_info(latex_path):
     tex_str = re.sub(r'\\begin\{figure\*\}', r'\\begin{figure}', tex_str)
     tex_str = re.sub(r'\\end\{figure\*\}', r'\\end{figure}', tex_str)
     
+    # Deal with \textcircled and \raisebox
+    tex_str = re.sub(r'\\raisebox\{[^\}]*\}(?:\[[^\]]*\]){0,2}\{([^\}]*)\}', r'\1', tex_str)
+    tex_str = re.sub(r'\\textcircled\{(.*?)\}', lambda m: '*' if not m.group(1).strip() else f'({m.group(1).strip()})', tex_str)
+    
     # print('---------DEBUG tex str')
     
     # print(tex_str)
@@ -549,13 +553,12 @@ def extract_latex_info(latex_path):
 
         captions = figure_node.getElementsByTagName("caption")
         if captions:
-            # print('-----caption-----')
-            # for child in captions[0].allChildNodes:
-            #     if hasattr(child, 'source'):
-            #         print(child.source)
-            # print('-----caption-----')
+            
             raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
-            result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
+            raw_text = custom_latex_to_text(raw_caption)
+            norm_text = enforce_spacing(raw_text)
+            result["figure_caption"] = norm_text
+            #result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
         else:
             return None # Must have caption
     else: return None # No figure node found
@@ -608,7 +611,6 @@ def custom_latex_to_text(latex):
     specs_db = get_default_latex_context_db()
     custom_specs = {
         'macros': [
-            # MacroTextSpec('textit', discard=False),
             MacroTextSpec('texttt', discard=False),  # keep contents
             MacroTextSpec('footnote', discard=True),
             MacroTextSpec('ref', discard=True),
