@@ -2,9 +2,9 @@ from benchmark_helpers import *
 
 def main():
     # Use benchmark_helpers to crawl bench mark
-    year='2024'
-    titles=return_acl_paper_titles(year=year)
-    titles=titles[:70]
+    year='2025'
+    venue='cvpr'
+    titles=return_paper_titles(year=year, venue=venue)
     #titles=['ABEX: Data Augmentation for Low-Resource NLU via Expanding Abstract Descriptions']
     # titles=['Unsupervised Multimodal Clustering for Semantics Discovery in Multimodal Utterances',
     #         'Detoxifying Large Language Models via Knowledge Editing',
