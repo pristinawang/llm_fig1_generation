@@ -17,13 +17,210 @@ import os
 from plasTeX.TeX import TeX
 from plasTeX.Base import LaTeX
 from pylatexenc.latex2text import LatexNodes2Text
-
+import openreview
 
 from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
 from pylatexenc import latexwalker, latex2text, macrospec
 from pylatexenc.latex2text import get_default_latex_context_db
 
+def return_paper_titles(year: str, venue: str):
+    if venue == 'acl':
+        return return_acl_paper_titles(year=year)
+    elif venue == 'naacl':
+        return return_naacl_paper_titles(year=year)
+    elif venue == 'emnlp':
+        return return_emnlp_paper_titles(year=year)
+    elif venue == 'neurips':
+        return return_neurips_paper_titles(year=year)
+    elif venue == 'iclr':
+        return return_iclr_paper_titles(year=year)
+    elif venue == 'cvpr':
+        return return_cvpr_paper_titles(year=year)
+    else:
+        raise ValueError(f"This venue is not supported yet: {venue}")
 
+def return_iclr_paper_titles(year: str):
+    """
+    Fetches the titles of papers accepted as 'oral' at ICLR for a given year.
+
+    Args:
+        year (str): Year of the ICLR conference, e.g., "2024"
+
+    Returns:
+        List[str]: A list of accepted oral paper titles
+    """
+    year_int=int(year)
+    if year_int<2020: raise ValueError(f"This year is not supported yet: {year}")
+    # check api version
+    venue_id = f'ICLR.cc/{year}/Conference'
+    
+    client = openreview.api.OpenReviewClient(
+        baseurl='https://api2.openreview.net',
+        username='pwang71@jh.edu',
+        password='Openrev1234'
+    )
+    api2_venue_group = client.get_group(venue_id)
+    api2_venue_domain = api2_venue_group.domain
+    if api2_venue_domain is None:
+        api_version='v1'
+    else:
+        api_version='v2'
+    
+    if api_version=='v2':
+        venue_group_settings = client.get_group(venue_id).content
+        submission_invitation = venue_group_settings['submission_id']['value']
+        submissions = client.get_all_notes(
+            invitation=submission_invitation,
+            details='directReplies'
+        )
+        titles = []
+        # API V2
+        venue_group_settings = client.get_group(venue_id).content
+        decision_invitation_name = venue_group_settings['decision_name']['value']
+        for submission in submissions:
+            paper_decision=''
+            for reply in submission.details['directReplies']:
+                if any(invitation.endswith(f'/-/{decision_invitation_name}') for invitation in reply['invitations']):
+                    paper_decision = reply['content']['decision']['value']
+                    break  # found decision for this submission, exit loop
+            if paper_decision.lower() in ["accept (oral)", "accept (poster)", "accept (spotlight)"]:
+                titles.append(submission.content['title']['value'])
+
+        return titles
+    elif api_version=='v1':
+        client = openreview.Client(
+            baseurl='https://api.openreview.net',
+            username='pwang71@jh.edu',
+            password='Openrev1234'
+        )
+        submissions = client.get_all_notes(
+            invitation=venue_id+"/-/Blind_Submission",
+            details='directReplies'
+        )
+        titles=[]
+        for submission in submissions:
+            paper_decision=''
+            for reply in submission.details["directReplies"]:
+                if reply["invitation"].endswith("Decision"):
+                    if 'decision' in reply['content']:
+                        paper_decision=reply['content']['decision']
+                        break
+                    elif 'recommendation' in reply['content']:
+                        paper_decision=reply['content']['recommendation']
+                        break
+
+            if paper_decision[:6].lower()=='accept' or paper_decision.lower() in ["accept (oral)", "accept (poster)", "accept (spotlight)", "accept: oral", "accept: poster", "accept: spotlight"]:
+                titles.append(submission.content['title'])
+        return titles
+    else:
+        raise ValueError(f"This api version doesn't exist.")
+
+def return_cvpr_paper_titles(year: str):
+    url = "https://cvpr.thecvf.com/Conferences/"+year+"/AcceptedPapers"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    paper_titles = []
+
+    # Go through all rows
+    for tr in soup.find_all('tr'):
+        tds = tr.find_all('td')
+        if not tds:
+            continue
+
+        first_td = tds[0]
+        title = None
+
+        # Case 1: <strong> tag title
+        strong = first_td.find('strong')
+        if strong:
+            title = strong.get_text(strip=True)
+
+        # Case 2: <a> tag title (e.g., GitHub/website link used as title)
+        elif first_td.find('a'):
+            a_tag = first_td.find('a')
+            title = a_tag.get_text(strip=True)
+
+        if title:
+            paper_titles.append(title)
+
+    return paper_titles
+
+def return_neurips_paper_titles(year: str):
+    url = "https://papers.nips.cc/paper_files/paper/"+year
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    paper_list = soup.find('ul', class_='paper-list')
+    if not paper_list:
+        raise Exception("Could not find the paper list on the page.")
+
+    titles = []
+    for li in paper_list.find_all('li', class_='conference'):
+        a_tag = li.find('a')
+        if a_tag:
+            title = a_tag.get_text(strip=True)
+            titles.append(title)
+
+    return titles
+
+def return_emnlp_paper_titles(year: str):
+    '''
+    input:
+    year of acl main track papers to extract, str; Ex: '2024'
+    
+    output:
+    list of titles of papers, list of str
+    '''
+    url = "https://aclanthology.org/volumes/"+year+".emnlp-main/"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+    soup = BeautifulSoup(response.content, "html.parser")
+
+    # This finds all paper titles
+    titles = []
+    for strong in soup.find_all("strong"):
+        a_tag = strong.find("a", class_="align-middle")
+        if a_tag:
+            titles.append(a_tag.text.strip())
+    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
+    return titles[1:]
+    
+def return_naacl_paper_titles(year: str):
+    '''
+    input:
+    year of acl main track papers to extract, str; Ex: '2024'
+    
+    output:
+    list of titles of papers, list of str
+    '''
+    url = "https://aclanthology.org/volumes/"+year+".naacl-long/"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+    soup = BeautifulSoup(response.content, "html.parser")
+
+    # This finds all paper titles
+    titles = []
+    for strong in soup.find_all("strong"):
+        a_tag = strong.find("a", class_="align-middle")
+        if a_tag:
+            titles.append(a_tag.text.strip())
+    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
+    return titles[1:]
 
 def return_acl_paper_titles(year: str):
     '''
@@ -34,7 +231,11 @@ def return_acl_paper_titles(year: str):
     list of titles of papers, list of str
     '''
     url = "https://aclanthology.org/volumes/"+year+".acl-long/"
-    response = requests.get(url)
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
     soup = BeautifulSoup(response.content, "html.parser")
 
     # This finds all paper titles
