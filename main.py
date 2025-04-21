@@ -2,8 +2,8 @@ from benchmark_helpers import *
 
 def main():
     # Use benchmark_helpers to crawl bench mark
-    year='2025'
-    venue='cvpr'
+    year='2020'
+    venue='acl'
     titles=return_paper_titles(year=year, venue=venue)
     #titles=['ABEX: Data Augmentation for Low-Resource NLU via Expanding Abstract Descriptions']
     # titles=['Unsupervised Multimodal Clustering for Semantics Discovery in Multimodal Utterances',

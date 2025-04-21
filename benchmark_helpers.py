@@ -22,22 +22,25 @@ import openreview
 from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
 from pylatexenc import latexwalker, latex2text, macrospec
 from pylatexenc.latex2text import get_default_latex_context_db
+from arxiv import UnexpectedEmptyPageError
 
 def return_paper_titles(year: str, venue: str):
     if venue == 'acl':
-        return return_acl_paper_titles(year=year)
+        titles = return_acl_paper_titles(year=year)
     elif venue == 'naacl':
-        return return_naacl_paper_titles(year=year)
+        titles = return_naacl_paper_titles(year=year)
     elif venue == 'emnlp':
-        return return_emnlp_paper_titles(year=year)
+        titles = return_emnlp_paper_titles(year=year)
     elif venue == 'neurips':
-        return return_neurips_paper_titles(year=year)
+        titles = return_neurips_paper_titles(year=year)
     elif venue == 'iclr':
-        return return_iclr_paper_titles(year=year)
+        titles = return_iclr_paper_titles(year=year)
     elif venue == 'cvpr':
-        return return_cvpr_paper_titles(year=year)
+        titles=return_cvpr_paper_titles(year=year)
     else:
         raise ValueError(f"This venue is not supported yet: {venue}")
+    print('✅ Extracted', len(titles), 'paper titles from', year, 'from', venue)
+    return titles
 
 def return_iclr_paper_titles(year: str):
     """
@@ -194,7 +197,6 @@ def return_emnlp_paper_titles(year: str):
         a_tag = strong.find("a", class_="align-middle")
         if a_tag:
             titles.append(a_tag.text.strip())
-    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
     return titles[1:]
     
 def return_naacl_paper_titles(year: str):
@@ -219,7 +221,6 @@ def return_naacl_paper_titles(year: str):
         a_tag = strong.find("a", class_="align-middle")
         if a_tag:
             titles.append(a_tag.text.strip())
-    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
     return titles[1:]
 
 def return_acl_paper_titles(year: str):
@@ -230,7 +231,13 @@ def return_acl_paper_titles(year: str):
     output:
     list of titles of papers, list of str
     '''
-    url = "https://aclanthology.org/volumes/"+year+".acl-long/"
+    year_int=int(year)
+    if year_int==2020:
+        url='https://aclanthology.org/volumes/'+year+'.acl-main/'
+    elif year_int<2020:
+        raise ValueError(f"This year is not supported yet({year}).")
+    else:
+        url = "https://aclanthology.org/volumes/"+year+".acl-long/"
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -244,7 +251,6 @@ def return_acl_paper_titles(year: str):
         a_tag = strong.find("a", class_="align-middle")
         if a_tag:
             titles.append(a_tag.text.strip())
-    print('✅ Extracted', len(titles[1:]), 'paper titles from', year)
     return titles[1:]
 
 def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.json"):
@@ -279,8 +285,10 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
             max_results=max_results,
             sort_by=arxiv.SortCriterion.Relevance
         )
-
-        results = list(client.results(search))
+        try:
+            results = list(client.results(search))
+        except UnexpectedEmptyPageError:
+            results = []
         
         for result in results:
             if result.title == title:
