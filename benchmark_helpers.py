@@ -22,6 +22,7 @@ import openreview
 from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
 from pylatexenc import latexwalker, latex2text, macrospec
 from pylatexenc.latex2text import get_default_latex_context_db
+from arxiv import UnexpectedEmptyPageError
 
 def return_paper_titles(year: str, venue: str):
     if venue == 'acl':
@@ -286,8 +287,8 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
         )
         try:
             results = list(client.results(search))
-        except:
-            results=[]
+        except UnexpectedEmptyPageError:
+            results = []
         
         for result in results:
             if result.title == title:
