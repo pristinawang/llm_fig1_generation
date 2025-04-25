@@ -6,7 +6,7 @@ import tarfile, os, csv
 import re, json
 from plasTeX.TeX import TeX
 from pylatexenc.latex2text import LatexNodes2Text
-
+import time
 from plasTeX.Packages.xcolor import ColorError
 
 from textacy import preprocessing
@@ -296,15 +296,17 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
                 break
         if title not in paper_dict.keys():
             not_found_titles.append(title)
+            paper_dict[title]=None
+        with open(arxiv_id_db_path, "w") as f:
+            json.dump(paper_dict, f)
+        time.sleep(3)
     if len(not_found_titles) > 0:
         print('❌ Failed to find', len(not_found_titles),'paper ids')
     elif len(not_in_db_titles)>0:
         print("✅ Found all", len(not_in_db_titles),'papers')
-    with open(arxiv_id_db_path, "w") as f:
-        json.dump(paper_dict, f)
     extracting_paper_dict={}
     for title in titles:
-        if title in paper_dict:
+        if not(paper_dict[title] is None):
             extracting_paper_dict[title]=paper_dict[title]
     return extracting_paper_dict, not_found_titles
 
