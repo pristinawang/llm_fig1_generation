@@ -207,12 +207,17 @@ def return_naacl_paper_titles(year: str):
     output:
     list of titles of papers, list of str
     '''
-    url = "https://aclanthology.org/volumes/"+year+".naacl-long/"
     try:
+        url = "https://aclanthology.org/volumes/"+year+".naacl-long/"
         response = requests.get(url)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+        try:
+            url = "https://aclanthology.org/volumes/"+year+".naacl-main/"
+            response = requests.get(url)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
     soup = BeautifulSoup(response.content, "html.parser")
 
     # This finds all paper titles
