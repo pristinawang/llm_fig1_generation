@@ -30,8 +30,8 @@ import random
 
 
 arxiv_retry = retry(
-    wait=wait_exponential(multiplier=1, min=4, max=60),  # 4s开始指数增长，最大间隔60s
-    stop=stop_after_attempt(5),  # 最多重试5次
+    wait=wait_exponential(multiplier=1, min=4, max=60), 
+    stop=stop_after_attempt(5),  
     retry=(
         retry_if_exception_type(UnexpectedEmptyPageError) |
         retry_if_exception_type(requests.exceptions.RequestException) |
