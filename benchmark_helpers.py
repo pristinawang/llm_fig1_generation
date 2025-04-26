@@ -24,6 +24,23 @@ from pylatexenc import latexwalker, latex2text, macrospec
 from pylatexenc.latex2text import get_default_latex_context_db
 from arxiv import UnexpectedEmptyPageError
 
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+import requests
+import random
+
+
+arxiv_retry = retry(
+    wait=wait_exponential(multiplier=1, min=4, max=60), 
+    stop=stop_after_attempt(5),  
+    retry=(
+        retry_if_exception_type(UnexpectedEmptyPageError) |
+        retry_if_exception_type(requests.exceptions.RequestException) |
+        retry_if_exception_type(ConnectionResetError)
+    ),
+    before_sleep=lambda _: print("arXiv API request failed, watiting for retrying...")
+)
+
+
 def return_paper_titles(year: str, venue: str):
     if venue == 'acl':
         titles = return_acl_paper_titles(year=year)
@@ -282,18 +299,36 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
     #titles=not_in_db_titles
     
     not_found_titles=[]
-    client = arxiv.Client()
+    client = arxiv.Client(
+        page_size=100,  
+        delay_seconds=5, 
+        num_retries=5    
+    )
     for i,title in enumerate(not_in_db_titles):
         print(f"Searching for paper {i+1} of {len(not_in_db_titles)}")
-        search = arxiv.Search(
-            query=title,
-            max_results=max_results,
-            sort_by=arxiv.SortCriterion.Relevance
-        )
+        
+        @arxiv_retry
+        def search_and_get_results():
+            search = arxiv.Search(
+                query=title,
+                max_results=max_results,
+                sort_by=arxiv.SortCriterion.Relevance
+            )
+            try:
+                return list(client.results(search))
+            except (UnexpectedEmptyPageError, 
+                    requests.exceptions.RequestException,
+                    ConnectionResetError) as e:
+                print(f"arXiv API错误: {str(e)}")
+                raise 
+
         try:
-            results = list(client.results(search))
-        except UnexpectedEmptyPageError:
-            results = []
+            results = search_and_get_results()
+        except Exception as e:
+            print(f"❌ Cannot get the paper [{title}] arxiv info: {str(e)}")
+            not_found_titles.append(title)
+            paper_dict[title] = None
+            continue  
         
         for result in results:
             if result.title == title:
@@ -304,7 +339,7 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
             paper_dict[title]=None
         with open(arxiv_id_db_path, "w") as f:
             json.dump(paper_dict, f)
-        time.sleep(3)
+        time.sleep(5 + random.uniform(0, 2))
     if len(not_found_titles) > 0:
         print('❌ Failed to find', len(not_found_titles),'paper ids')
     elif len(not_in_db_titles)>0:
