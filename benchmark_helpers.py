@@ -408,17 +408,23 @@ def download_arxiv_source(arxiv_id, save_path):
     return True if download was successful
     return False if download was unsuccessful
     '''
-    #url = f"https://arxiv.org/src/{arxiv_id}"
-    url = f"https://export.arxiv.org/src/{arxiv_id}"
-    response = requests.get(url)
+    url1 = f"https://arxiv.org/src/{arxiv_id}"
+    url2 = f"https://export.arxiv.org/src/{arxiv_id}"
+    response = requests.get(url1)
     
     if response.status_code == 200:
         with open(save_path, "wb") as f:
             f.write(response.content)
         return True
     else:
-        print(response.status_code)
-        return False
+        response = requests.get(url2)
+        if response.status_code == 200:
+            with open(save_path, "wb") as f:
+                f.write(response.content)
+            return True
+        else:
+            print(response.status_code)
+            return False
 
 def list_top_level_tex_files(folder_path):
     tex_files = []
