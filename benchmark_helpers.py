@@ -8,17 +8,17 @@ from plasTeX.TeX import TeX
 from pylatexenc.latex2text import LatexNodes2Text
 import time
 from plasTeX.Packages.xcolor import ColorError
-
+import plasTeX
 from textacy import preprocessing
 import spacy
-
+import pandas as pd
 from pylatexenc.latexwalker import LatexWalker
 import os
 from plasTeX.TeX import TeX
 from plasTeX.Base import LaTeX
 from pylatexenc.latex2text import LatexNodes2Text
 import openreview
-
+from datetime import datetime
 from pylatexenc.latex2text import LatexNodes2Text, MacroTextSpec
 from pylatexenc import latexwalker, latex2text, macrospec
 from pylatexenc.latex2text import get_default_latex_context_db
@@ -27,7 +27,6 @@ from arxiv import UnexpectedEmptyPageError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 import requests
 import random
-
 
 arxiv_retry = retry(
     wait=wait_exponential(multiplier=1, min=4, max=60), 
@@ -179,17 +178,22 @@ def return_neurips_paper_titles(year: str):
         raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    paper_list = soup.find('ul', class_='paper-list')
-    if not paper_list:
-        raise Exception("Could not find the paper list on the page.")
+    if int(year)<=2021:
+        # Find all <a> tags inside <li> elements with class 'none'
+        title_tags = soup.select("li.none a[title='paper title']")
+        titles = [tag.text.strip() for tag in title_tags]    
+    else:
+        paper_list = soup.find('ul', class_='paper-list')
+        if not paper_list:
+            raise Exception("Could not find the paper list on the page.")
 
-    titles = []
-    for li in paper_list.find_all('li', class_='conference'):
-        a_tag = li.find('a')
-        if a_tag:
-            title = a_tag.get_text(strip=True)
-            titles.append(title)
-
+        titles = []
+        for li in paper_list.find_all('li', class_='conference'):
+            a_tag = li.find('a')
+            if a_tag:
+                title = a_tag.get_text(strip=True)
+                titles.append(title)
+                
     return titles
 
 def return_emnlp_paper_titles(year: str):
@@ -275,7 +279,28 @@ def return_acl_paper_titles(year: str):
             titles.append(a_tag.text.strip())
     return titles[1:]
 
-def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.json"):
+def load_csv_db(csv_path):
+    db_dict={}
+    with open(csv_path, 'r', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)  # Reads rows into dictionaries
+        for row in reader:
+            title=row['title']
+            p_id=row['id']
+            if p_id=='': p_id=None
+            db_dict[title] = p_id
+    return db_dict
+
+def write_csv_db(csv_path, row):
+    fieldnames = ["title", "id"]
+    if not(os.path.isfile(csv_path)):
+        with open(csv_path, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+    with open(csv_path, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)                        
+        writer.writerow(row)
+
+def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.csv", backup_db_path=None):
     '''
     input:
     list of titles, list of str
@@ -286,15 +311,18 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
     not_found_titles: list of not found paper titles, list of str
     '''
     if os.path.exists(arxiv_id_db_path):
-        with open(arxiv_id_db_path, "r") as f:
-            paper_dict = json.load(f)
+        paper_dict = load_csv_db(arxiv_id_db_path)
+        # with open(arxiv_id_db_path, "r") as f:
+        #     paper_dict = json.load(f)
     else:
         paper_dict = {}
     
     not_in_db_titles=[]
+    none_id_titles=[]
     for title in titles:
         if not(title in paper_dict): not_in_db_titles.append(title)
-    print("🔍 Found", len(titles)-len(not_in_db_titles),"out of",len(titles), "ids in database", arxiv_id_db_path)
+        elif paper_dict[title] is None: none_id_titles.append(title)
+    print("🔍 Found", len(titles)-len(not_in_db_titles),"out of",len(titles), "ids in database", arxiv_id_db_path,'and',len(none_id_titles),'out of',len(titles)-len(not_in_db_titles),'have None type arxiv id')
     if len(not_in_db_titles)>0: print('Start searching for the remaining', len(not_in_db_titles), "ids")
     #titles=not_in_db_titles
     
@@ -337,9 +365,13 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
         if title not in paper_dict.keys():
             not_found_titles.append(title)
             paper_dict[title]=None
-        with open(arxiv_id_db_path, "w") as f:
-            json.dump(paper_dict, f)
-        time.sleep(5 + random.uniform(0, 2))
+            
+        row={'title':title,'id':paper_dict[title]}
+        write_csv_db(arxiv_id_db_path, row)
+        if backup_db_path: write_csv_db(backup_db_path, row)
+        # with open(arxiv_id_db_path, "w") as f:
+        #     json.dump(paper_dict, f)
+        #time.sleep(5 + random.uniform(0, 2))
     if len(not_found_titles) > 0:
         print('❌ Failed to find', len(not_found_titles),'paper ids')
     elif len(not_in_db_titles)>0:
@@ -350,19 +382,42 @@ def get_arxiv_id_dict(titles, max_results=10, arxiv_id_db_path="./arxiv_id_db.js
             extracting_paper_dict[title]=paper_dict[title]
     return extracting_paper_dict, not_found_titles
 
+def merge_json_dbs_to_single_csv_db(db_paths, new_db_path):
+    dicts=[]
+    for db_path in db_paths:
+        with open(db_path, "r") as f:
+            dicts.append(json.load(f))
+        print('Old DB path:', db_path, 'has', len(dicts[-1]),'data items')
+    big_dict={}
+    for db_dict in dicts:
+        for title, p_id in db_dict.items():
+            data = {'title': title, 'id':p_id}
+            big_dict[title] = data
+    print('Merged db has', len(big_dict), 'data items')
+    data_ls=[]
+    for title, data in big_dict.items():
+        data_ls.append(data)
+    with open(new_db_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=data_ls[0].keys())
+        writer.writeheader()
+        writer.writerows(data_ls)
+    print('✅ New db saved to', new_db_path)
+
 def download_arxiv_source(arxiv_id, save_path):
     '''
     return True if download was successful
     return False if download was unsuccessful
     '''
-    url = f"https://arxiv.org/src/{arxiv_id}"
+    #url = f"https://arxiv.org/src/{arxiv_id}"
+    url = f"https://export.arxiv.org/src/{arxiv_id}"
     response = requests.get(url)
-
+    
     if response.status_code == 200:
         with open(save_path, "wb") as f:
             f.write(response.content)
         return True
     else:
+        print(response.status_code)
         return False
 
 def list_top_level_tex_files(folder_path):
@@ -396,7 +451,7 @@ def download_latex_files(paper_id_dict, save_dir_path):
         tar_path=save_dir_path+id+'.tar'
         if download_arxiv_source(arxiv_id=id, save_path=tar_path):
             try:
-                with tarfile.open(tar_path, "r:gz") as tar:
+                with tarfile.open(tar_path, "r:*") as tar: #with tarfile.open(tar_path, "r:gz") as tar:
                     tar.extractall(path=save_dir_path+id)
                 os.remove(tar_path)
                 print(f"{id} Downloaded and extracted source to {tar_path}")
@@ -419,13 +474,88 @@ def ensure_empty_dir(dir_path):
     # Then create a fresh empty version
     os.makedirs(dir_path)
     print('Created directory', dir_path)
+    
+def ensure_safe_resume(paper_id_dict, csv_path, folder, img_folder):
+    '''
+    This function ensure img_folder and csv_path have the same values
+    
+    p.s.
+    if we want the folder to only contains data that's in paper_id_dict, add "& set(paper_id_dict.values())" to overlapping_ids
+    '''
+    overlapping_ids = set()
+    if os.path.isdir(img_folder) and  os.path.isfile(csv_path):
+        df = pd.read_csv(csv_path)
+        csv_ids=df["arxiv_id"].dropna().tolist()
+        
+        filenames = os.listdir(img_folder)
+        id_filename_dict = {os.path.splitext(f)[0]:f for f in filenames}
+        img_ids = list(id_filename_dict.keys())
+        overlapping_ids = set(csv_ids) & set(img_ids)
+        if len(set(img_ids) - overlapping_ids)>0:
+            to_be_deleted = list(set(img_ids) - overlapping_ids)
+            for id_ in to_be_deleted:
+                os.remove(os.path.join(img_folder, id_filename_dict[id_]))
+
+        rows=[]
+        with open(csv_path, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Access columns by name
+                title = row.get('paper_title')
+                abstract = row.get('abstract')
+                id_ = row.get('arxiv_id')
+                fig1_path = row.get('fig1_file_path')
+                caption = row.get('fig1_caption')
+                introduction = row.get('introduction')
+                if id_ in overlapping_ids:
+                    rows.append({
+                        "paper_title": title,
+                        "arxiv_id": id_,
+                        "abstract": abstract,
+                        "fig1_file_path": fig1_path,
+                        "fig1_caption": caption,
+                        "introduction": introduction
+                    })
+        # Write to temporary file first
+        temp_csv_path = csv_path + ".tmp"
+        # ✅ Save to CSV
+        fieldnames = ["paper_title", "arxiv_id", "fig1_file_path", "fig1_caption", "abstract", "introduction"]
+        with open(temp_csv_path, mode="w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        # Safely replace original file with the temporary file
+        os.replace(temp_csv_path, csv_path)
+    else:
+        ensure_empty_dir(folder)
+        ensure_empty_dir(img_folder)
+    remaining_paper_id_dict = {}
+    checkpoint_titles = []
+    for title, id_ in paper_id_dict.items():
+        if not(id_ in overlapping_ids):
+            remaining_paper_id_dict[title]=id_
+        else:
+            checkpoint_titles.append(title)
+    if len(overlapping_ids - set(paper_id_dict.values()))>0:
+        print('🫶 Found', len(overlapping_ids - set(paper_id_dict.values())),'data items that are not in requested list in benchmark directory and safely kept all.')
+    if len(overlapping_ids & set(paper_id_dict.values()))>0: 
+        print('➡️ Resume from previous checkpoint where', len(overlapping_ids & set(paper_id_dict.values())),'out of',len(paper_id_dict),'data items exist')     
+    if len(remaining_paper_id_dict)>0:
+        print('Start extracting the remaining', len(remaining_paper_id_dict),'out of', len(paper_id_dict), 'to csv')
+    return checkpoint_titles, remaining_paper_id_dict
+        
+
 
 def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separater=';'):
+    folder=os.path.dirname(csv_path)
+    img_folder=os.path.join(folder, 'img')
+    total_extractions, paper_id_dict = ensure_safe_resume(paper_id_dict, csv_path, folder, img_folder)
+    fieldnames = ["paper_title", "arxiv_id", "fig1_file_path", "fig1_caption", "abstract", "introduction"]
+    if not(os.path.isfile(csv_path)):
+        with open(csv_path, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
     success_extractions=[]
-    folder='/'.join(csv_path.split('/')[:-1])
-    ensure_empty_dir(dir_path=folder)
-    ensure_empty_dir(dir_path=folder+'/img')
-    rows = []
     for title, id in paper_id_dict.items():
         folder_path=latex_files_path+'/'+id
         tex_files = list_top_level_tex_files(folder_path=folder_path)
@@ -450,28 +580,28 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
                     # Copy img to new path
                     new_filename=id + os.path.splitext(fig1_file_path)[1] 
                     destination_path = os.path.join(folder+'/img', new_filename)
+                    if not(os.path.isfile(fig1_file_path)):
+                        break
                     shutil.copy2(fig1_file_path, destination_path)
                     fig1_file_path=destination_path
                     
-                    rows.append({
+                    row_dict={
                         "paper_title": title,
                         "arxiv_id": id,
                         "abstract": abstract_str,
                         "fig1_file_path": fig1_file_path,
                         "fig1_caption": fig1_caption_str,
                         "introduction": introduction_str
-                    })
+                    }
+                    # ✅ Save to CSV
+                    with open(csv_path, mode='a', newline='', encoding='utf-8') as f:
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)                        
+                        writer.writerow(row_dict)
                     success_extractions.append(title)
                     break
-
-    # ✅ Save to CSV
-    fieldnames = ["paper_title", "arxiv_id", "fig1_file_path", "fig1_caption", "abstract", "introduction"]
-    with open(csv_path, mode="w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    total_extractions = total_extractions + success_extractions
     print('✅',len(success_extractions),'out of',len(paper_id_dict),'were extracted and saved to CSV', csv_path)
-    return success_extractions
+    return total_extractions
 
 def remove_commented_lines(text):
     """
@@ -714,8 +844,7 @@ def resolve_image_path(base_path, search_dir):
 
 #     return None
 
-def extract_latex_info(latex_path):
-
+def extract_latex_info(latex_path):    
     # Read LaTeX content
     with open(latex_path, 'r', encoding='utf-8') as f:
         tex_str = f.read()
