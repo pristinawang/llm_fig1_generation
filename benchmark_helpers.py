@@ -69,6 +69,7 @@ def return_iclr_paper_titles(year: str):
     Returns:
         List[str]: A list of accepted oral paper titles
     """
+    time.sleep(60)
     year_int=int(year)
     if year_int<2020: raise ValueError(f"This year is not supported yet: {year}")
     # check api version
@@ -564,7 +565,7 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
             writer.writeheader()
     success_extractions=[]
     for title, id in paper_id_dict.items():
-        print('✅ parsing title:', title, 'id:', id)
+        print('✅ Working on extracting title:', title, 'id:',id)
         folder_path=latex_files_path+'/'+id
         tex_files = list_top_level_tex_files(folder_path=folder_path)
         if len(tex_files)==0:
