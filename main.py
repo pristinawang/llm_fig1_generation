@@ -8,21 +8,23 @@ def main():
     # year='2021'
     # venue='naacl'
     target_dict = {
-        '2023':'cvpr',
-        '2024':'cvpr',
-        '2025':'cvpr'
+        '2024':'neurips',
+        # '2021':'neurips',
+        # '2023':'neurips',
+        # '2024':'neurips'
         }
     
-    # save_dir_path = '/scratch4/afield6/pwang71/llm_fig1_generation/arxiv_source/'
-    latex_files_path = './arxiv_source/'
+    latex_files_path = '/scratch4/afield6/pwang71/llm_fig1_generation/arxiv_source/'
+    #latex_files_path = './arxiv_source/'
     # csv_path = os.path.join('./benchmark/', venue, year, f'{venue}_{year}.csv')
     # backup_db_path = '/scratch4/afield6/pwang71/llm_fig1_generation/arxiv_id_db_backup.csv'
     benchmark_dir_path = './benchmark/'
-    backup_dir_path ='/export/fs05/pwang71/llm_fig1_generation'
+    backup_dir_path = '/scratch4/afield6/pwang71/llm_fig1_generation'
+    # backup_dir_path ='/export/fs05/pwang71/llm_fig1_generation'
     cpu_num = 8
     
     #concurrent_full_extraction(target_dict, latex_files_path, benchmark_dir_path, backup_dir_path, cpu_num)
-    # save_ids(target_dict, backup_dir_path)
+    #save_ids(target_dict, backup_dir_path)
     regular_full_extraction(target_dict, latex_files_path, benchmark_dir_path, backup_dir_path)
     
     # titles=return_paper_titles(year=year, venue=venue)
