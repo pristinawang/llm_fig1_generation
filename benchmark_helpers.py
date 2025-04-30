@@ -27,6 +27,7 @@ from arxiv import UnexpectedEmptyPageError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 import requests
 import random
+from fig_extraction_helpers import *
 
 arxiv_retry = retry(
     wait=wait_exponential(multiplier=1, min=4, max=60), 
@@ -570,7 +571,8 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
         if len(tex_files)==0:
             print(f" ❌ {id} Failed to find tex file.")
         else:
-
+            main_tex=find_main_tex(tex_files)
+            if not(main_tex is None): tex_files=[main_tex]
             for tex in tex_files:
                 try:
                     results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
@@ -611,55 +613,55 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
     print('✅',len(success_extractions),'out of',len(paper_id_dict),'were extracted and saved to CSV', csv_path)
     return total_extractions
 
-def remove_commented_lines(text):
-    """
-    Removes lines that start with '%' (i.e., fully commented lines).
-    Returns the cleaned text. Does NOT remove inline comments (e.g. text % comment).
-    """
-    lines = text.splitlines()
-    cleaned_lines = []
-    for line in lines:
-        striped = line.lstrip()
-        if striped.startswith('%'):
-            # Entire line commented out, skip it
-            continue
-        cleaned_lines.append(line)
-    return "\n".join(cleaned_lines)
+# def remove_commented_lines(text):
+#     """
+#     Removes lines that start with '%' (i.e., fully commented lines).
+#     Returns the cleaned text. Does NOT remove inline comments (e.g. text % comment).
+#     """
+#     lines = text.splitlines()
+#     cleaned_lines = []
+#     for line in lines:
+#         striped = line.lstrip()
+#         if striped.startswith('%'):
+#             # Entire line commented out, skip it
+#             continue
+#         cleaned_lines.append(line)
+#     return "\n".join(cleaned_lines)
 
-def extract_brace_block(tex, start_pattern=r'\\caption\s*\{'):
-    """
-    Finds the first occurrence of something matching start_pattern (by default '\\caption{'),
-    and returns everything up to the matching '}' (handling nested braces).
+# def extract_brace_block(tex, start_pattern=r'\\caption\s*\{'):
+#     """
+#     Finds the first occurrence of something matching start_pattern (by default '\\caption{'),
+#     and returns everything up to the matching '}' (handling nested braces).
     
-    Returns:
-       (content, end_index):
-         content = string inside the { ... }
-         end_index = position in the string right after the matching }
-       or (None, None) if not found / not matched properly.
-    """
-    start_match = re.search(start_pattern, tex)
-    if not start_match:
-        return None, None  # no '\\caption{' found
+#     Returns:
+#        (content, end_index):
+#          content = string inside the { ... }
+#          end_index = position in the string right after the matching }
+#        or (None, None) if not found / not matched properly.
+#     """
+#     start_match = re.search(start_pattern, tex)
+#     if not start_match:
+#         return None, None  # no '\\caption{' found
     
-    start_idx = start_match.end()  # index right after the '{'
-    brace_count = 1
-    i = start_idx
-    n = len(tex)
+#     start_idx = start_match.end()  # index right after the '{'
+#     brace_count = 1
+#     i = start_idx
+#     n = len(tex)
 
-    while i < n and brace_count > 0:
-        if tex[i] == '{':
-            brace_count += 1
-        elif tex[i] == '}':
-            brace_count -= 1
-        i += 1
+#     while i < n and brace_count > 0:
+#         if tex[i] == '{':
+#             brace_count += 1
+#         elif tex[i] == '}':
+#             brace_count -= 1
+#         i += 1
 
-    if brace_count != 0:
-        # Did not find matching '}'
-        return None, None
+#     if brace_count != 0:
+#         # Did not find matching '}'
+#         return None, None
     
-    # content is everything between the first '{' and its matching '}'
-    content = tex[start_idx : i-1]
-    return content, i
+#     # content is everything between the first '{' and its matching '}'
+#     content = tex[start_idx : i-1]
+#     return content, i
 
 # def extract_latex_content(latex_path):
 #     results={}
@@ -698,113 +700,113 @@ def extract_brace_block(tex, start_pattern=r'\\caption\s*\{'):
 
 
 
-def find_first_figure_abstract_caption(main_tex_path):
-    """
-    Reads a LaTeX file, removes fully commented lines, then searches for:
-      1) The FIRST figure environment (either \begin{figure} or \begin{figure*}, with optional [ht!] etc.):
-         - All \includegraphics commands within it (returned as a list of paths).
-         - The \caption{...} text (including nested braces).
-      2) The \begin{abstract}...\end{abstract} block (simple regex).
+# def find_first_figure_abstract_caption(main_tex_path):
+#     """
+#     Reads a LaTeX file, removes fully commented lines, then searches for:
+#       1) The FIRST figure environment (either \begin{figure} or \begin{figure*}, with optional [ht!] etc.):
+#          - All \includegraphics commands within it (returned as a list of paths).
+#          - The \caption{...} text (including nested braces).
+#       2) The \begin{abstract}...\end{abstract} block (simple regex).
       
-    Returns: (image_paths, first_fig_caption, abstract_str)
-      - image_paths: list of str or None if no figure is found
-      - first_fig_caption: str or None
-      - abstract_str: str or None
-    """
+#     Returns: (image_paths, first_fig_caption, abstract_str)
+#       - image_paths: list of str or None if no figure is found
+#       - first_fig_caption: str or None
+#       - abstract_str: str or None
+#     """
 
-    if not os.path.exists(main_tex_path):
-        print(f"[ERROR] main.tex doesn't exist: {main_tex_path}")
-        return None#[None, None, None]
+#     if not os.path.exists(main_tex_path):
+#         print(f"[ERROR] main.tex doesn't exist: {main_tex_path}")
+#         return None#[None, None, None]
 
-    # 1) Read the file content
-    with open(main_tex_path, 'r', encoding='utf-8') as f:
-        original_tex = f.read()
+#     # 1) Read the file content
+#     with open(main_tex_path, 'r', encoding='utf-8') as f:
+#         original_tex = f.read()
 
-    # 2) Remove lines that are fully commented
-    tex_content = remove_commented_lines(original_tex)
+#     # 2) Remove lines that are fully commented
+#     tex_content = remove_commented_lines(original_tex)
 
-    # ============== (A) Match the FIRST figure environment ==============
-    # We allow \begin{figure*} or \begin{figure}, plus any arguments like [t!], etc.
-    # Same for \end{figure*} or \end{figure}.
-    figure_env_pattern = re.compile(
-        r'\\begin\{figure\*?[^}]*\}(.*?)\\end\{figure\*?[^}]*\}',
-        re.DOTALL
-    )
-    figure_env_match = re.search(figure_env_pattern, tex_content)
+#     # ============== (A) Match the FIRST figure environment ==============
+#     # We allow \begin{figure*} or \begin{figure}, plus any arguments like [t!], etc.
+#     # Same for \end{figure*} or \end{figure}.
+#     figure_env_pattern = re.compile(
+#         r'\\begin\{figure\*?[^}]*\}(.*?)\\end\{figure\*?[^}]*\}',
+#         re.DOTALL
+#     )
+#     figure_env_match = re.search(figure_env_pattern, tex_content)
 
-    image_paths = []
-    full_image_paths = []
-    first_fig_caption = None
-    dirname = os.path.dirname(main_tex_path)
+#     image_paths = []
+#     full_image_paths = []
+#     first_fig_caption = None
+#     dirname = os.path.dirname(main_tex_path)
 
-    if figure_env_match:
-        figure_env = figure_env_match.group(1)  # content inside the figure block
+#     if figure_env_match:
+#         figure_env = figure_env_match.group(1)  # content inside the figure block
 
-        # (A1) Find ALL \includegraphics{...} calls
-        incl_pattern = r'\\includegraphics(?:\[[^\]]*\])?\{([^}]*)\}'
-        raw_image_paths = re.findall(incl_pattern, figure_env)
-        if raw_image_paths:
-            image_paths = [path.strip() for path in raw_image_paths]
-            full_image_paths = [
-            os.path.join(dirname, img_path)  # 组合完整路径
-            for img_path in image_paths
-            ]
-            if len(full_image_paths)>1: 
-                print("[INFO] More than one fig in fig1", image_paths)
-                return None   
-            fig1_full_image_path = full_image_paths[0]
-            print("[INFO] Found image path in the figure environment:", fig1_full_image_path)
-        else:
-            print("[INFO] No \\includegraphics{...} found.")
-            return None
-            full_image_paths = None
+#         # (A1) Find ALL \includegraphics{...} calls
+#         incl_pattern = r'\\includegraphics(?:\[[^\]]*\])?\{([^}]*)\}'
+#         raw_image_paths = re.findall(incl_pattern, figure_env)
+#         if raw_image_paths:
+#             image_paths = [path.strip() for path in raw_image_paths]
+#             full_image_paths = [
+#             os.path.join(dirname, img_path)  # 组合完整路径
+#             for img_path in image_paths
+#             ]
+#             if len(full_image_paths)>1: 
+#                 print("[INFO] More than one fig in fig1", image_paths)
+#                 return None   
+#             fig1_full_image_path = full_image_paths[0]
+#             print("[INFO] Found image path in the figure environment:", fig1_full_image_path)
+#         else:
+#             print("[INFO] No \\includegraphics{...} found.")
+#             return None
+#             full_image_paths = None
 
-        # (A2) Extract the caption via nested-brace parsing
-        caption_content, _ = extract_brace_block(figure_env, start_pattern=r'\\caption\s*\{')
-        if caption_content is not None:
-            # If you want to remove or transform certain LaTeX commands inside the caption, do it here:
-            # e.g. remove \small, \label, \textbf, but keep references:
-            clean_cap = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', caption_content)
-            # Remove extra whitespace
-            clean_cap = re.sub(r'\s+', ' ', clean_cap).strip()
-            first_fig_caption = clean_cap
-            print(f"[INFO] Found figure caption: {first_fig_caption}")
-        else:
-            return None
-            first_fig_caption = None
-            print("[INFO] No \\caption{...} found in this figure block.")
-    else:
-        return None
-        image_paths = None
-        first_fig_caption = None
-        print("[WARNING] No figure environment found in main.tex")
+#         # (A2) Extract the caption via nested-brace parsing
+#         caption_content, _ = extract_brace_block(figure_env, start_pattern=r'\\caption\s*\{')
+#         if caption_content is not None:
+#             # If you want to remove or transform certain LaTeX commands inside the caption, do it here:
+#             # e.g. remove \small, \label, \textbf, but keep references:
+#             clean_cap = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', caption_content)
+#             # Remove extra whitespace
+#             clean_cap = re.sub(r'\s+', ' ', clean_cap).strip()
+#             first_fig_caption = clean_cap
+#             print(f"[INFO] Found figure caption: {first_fig_caption}")
+#         else:
+#             return None
+#             first_fig_caption = None
+#             print("[INFO] No \\caption{...} found in this figure block.")
+#     else:
+#         return None
+#         image_paths = None
+#         first_fig_caption = None
+#         print("[WARNING] No figure environment found in main.tex")
 
-    # ============== (B) Match the abstract environment ==============
-    abstract_str = None
-    abstract_pattern = r'\\begin\{abstract\}(.*?)\\end\{abstract\}'
-    abstract_match = re.search(abstract_pattern, tex_content, flags=re.DOTALL)
-    if abstract_match:
-        raw_abs = abstract_match.group(1)
-        abstract_str = clean_latex_to_text(raw_abs) # needs try block
+#     # ============== (B) Match the abstract environment ==============
+#     abstract_str = None
+#     abstract_pattern = r'\\begin\{abstract\}(.*?)\\end\{abstract\}'
+#     abstract_match = re.search(abstract_pattern, tex_content, flags=re.DOTALL)
+#     if abstract_match:
+#         raw_abs = abstract_match.group(1)
+#         abstract_str = clean_latex_to_text(raw_abs) # needs try block
         
-        # raw_abs = abstract_match.group(1)
-        # # Optionally remove some LaTeX commands from the abstract:
-        # raw_abs = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', raw_abs)
+#         # raw_abs = abstract_match.group(1)
+#         # # Optionally remove some LaTeX commands from the abstract:
+#         # raw_abs = re.sub(r'\\(small|label|textbf|textit|mathrm|emph)\b(\[[^\]]*\])?', '', raw_abs)
 
-        # raw_abs = re.sub(r'\\[A-Za-z]+\{.*?\}', '', raw_abs)
-        # raw_abs = re.sub(r'\\[A-Za-z]+', '', raw_abs)
-        # raw_abs = re.sub(r'\s+', ' ', raw_abs).strip()
-        # abstract_str = raw_abs
-        # print("[INFO] Found abstract:", abstract_str)
-    else:
-        return None
-        print("[WARNING] No abstract found in main.tex")
-    return {
-        "fig1_path": fig1_full_image_path,
-        "abstract": abstract_str,
-        "fig1_caption": first_fig_caption
-    }
-    return [full_image_paths, abstract_str, first_fig_caption]
+#         # raw_abs = re.sub(r'\\[A-Za-z]+\{.*?\}', '', raw_abs)
+#         # raw_abs = re.sub(r'\\[A-Za-z]+', '', raw_abs)
+#         # raw_abs = re.sub(r'\s+', ' ', raw_abs).strip()
+#         # abstract_str = raw_abs
+#         # print("[INFO] Found abstract:", abstract_str)
+#     else:
+#         return None
+#         print("[WARNING] No abstract found in main.tex")
+#     return {
+#         "fig1_path": fig1_full_image_path,
+#         "abstract": abstract_str,
+#         "fig1_caption": first_fig_caption
+#     }
+#     return [full_image_paths, abstract_str, first_fig_caption]
 
 def has_extension(path):
     return os.path.splitext(path)[1] != ''  # e.g. returns '.png' → True
@@ -852,11 +854,13 @@ def resolve_image_path(base_path, search_dir):
 
 #     return None
 
-def extract_latex_info(latex_path):    
+def extract_latex_info(latex_path):
+    betterparsing = BetterParsing(latex_path)    
     # Read LaTeX content
     with open(latex_path, 'r', encoding='utf-8') as f:
         tex_str = f.read()
-
+    tex_str = re.sub(r'\\input\{([^}]+)\}', betterparsing.replace_input, tex_str)
+    
     ## Remove tables
     tex_str = re.sub(r'\\begin\{table\*?\}.*?\\end\{table\*?\}', '', tex_str, flags=re.DOTALL)
     
@@ -915,41 +919,56 @@ def extract_latex_info(latex_path):
 
         
     else: return None # No abstract node found
-    # print(result)
-    # print('-----HERE??')
     
-    # --- Extract first figure node ---    
-    figure_node = None
-    for fig in doc.getElementsByTagName("figure"):
-        figure_node = fig
-        break
-    if figure_node:
-        includes = figure_node.getElementsByTagName("includegraphics")
-        image_paths = [img.attributes.get("file", "") for img in includes if img.attributes.get("file", "")]
-        if len(image_paths) != 1:
-            return None  # Must have exactly one image
-
-        raw_image_path = image_paths[0]
-
+    fig_result = simple_ext(tex_str, debug=False)
+    if fig_result:
+        raw_image_path = fig_result['path']
+        raw_caption = fig_result['cap_tex']
         resolved_path = resolve_image_path(raw_image_path, search_dir=os.path.dirname(latex_path))
         if not resolved_path:
+            print("❌ Fig1 path cannot be resolved")
             return None
         result["image_path"] = resolved_path
+        raw_text = custom_latex_to_text(raw_caption)
+        norm_text = enforce_spacing(raw_text)
+        result["figure_caption"] = norm_text
+
+    else:
+        print("❌ Figure extraction failed")
+        return None
+    
+    # --- Extract first figure node ---    
+    # figure_node = None
+    # for fig in doc.getElementsByTagName("figure"):
+    #     figure_node = fig
+    #     break
+    # if figure_node:
+    #     includes = figure_node.getElementsByTagName("includegraphics")
+    #     image_paths = [img.attributes.get("file", "") for img in includes if img.attributes.get("file", "")]
+    #     if len(image_paths) != 1:
+    #         return None  # Must have exactly one image
+
+    #     raw_image_path = image_paths[0]
+
+    #     resolved_path = resolve_image_path(raw_image_path, search_dir=os.path.dirname(latex_path))
+    #     if not resolved_path:
+    #         return None
+    #     result["image_path"] = resolved_path
         
 
 
 
-        captions = figure_node.getElementsByTagName("caption")
-        if captions:
+    #     captions = figure_node.getElementsByTagName("caption")
+    #     if captions:
             
-            raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
-            raw_text = custom_latex_to_text(raw_caption)
-            norm_text = enforce_spacing(raw_text)
-            result["figure_caption"] = norm_text
-            #result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
-        else:
-            return None # Must have caption
-    else: return None # No figure node found
+    #         raw_caption = captions[0].source #''.join([child.source for child in captions[0].allChildNodes if hasattr(child, 'source')])
+    #         raw_text = custom_latex_to_text(raw_caption)
+    #         norm_text = enforce_spacing(raw_text)
+    #         result["figure_caption"] = norm_text
+    #         #result["figure_caption"] = LatexNodes2Text().latex_to_text(raw_caption).strip()
+    #     else:
+    #         return None # Must have caption
+    # else: return None # No figure node found
     # print(result)
     
     # --- Extract \section{Introduction} ---
@@ -1002,6 +1021,7 @@ def custom_latex_to_text(latex):
             MacroTextSpec('texttt', discard=False),  # keep contents
             MacroTextSpec('footnote', discard=True),
             MacroTextSpec('ref', discard=True),
+            MacroTextSpec('href', discard=False), #keep content
             MacroTextSpec('autoref', discard=True),
             MacroTextSpec('cref', discard=True),
             MacroTextSpec('Cref', discard=True),
@@ -1094,3 +1114,34 @@ def enforce_spacing(text):
 
 
     return text
+
+class BetterParsing:
+    def __init__(self, tex_path):
+        self.dir_path = os.path.dirname(tex_path)
+        
+    def replace_input(self,match):
+        file_name = match.group(1)
+        file_path=self.ensure_tex_extension(file_name)
+        file_path = os.path.join(self.dir_path, file_path)
+        if os.path.isfile(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                tex_str = f.read()
+            return tex_str
+        else:
+            return ''
+
+    def ensure_tex_extension(self,file_name):
+        root, ext = os.path.splitext(file_name)
+        if ext:
+            return file_name  # already has an extension
+        else:
+            return file_name + '.tex'
+
+def find_main_tex(tex_files):
+    for latex_path in tex_files:
+        with open(latex_path, 'r', encoding='utf-8') as f:
+            tex_str = f.read()
+        if r'\documentclass' in tex_str:
+            return latex_path
+    else:
+        return None
