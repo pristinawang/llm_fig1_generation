@@ -573,12 +573,11 @@ def extract_to_csv(paper_id_dict, latex_files_path, csv_path, fig1_path_separate
             main_tex=find_main_tex(tex_files)
             if not(main_tex is None): tex_files=[main_tex]
             for tex in tex_files:
-                results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
-                # try:
-                #     results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
-                # except Exception as e:
-                #     results=None
-                #     print("❌ [extract tex ERROR]",e)
+                try:
+                    results = extract_latex_info(latex_path=tex)#find_first_figure_abstract_caption(main_tex_path=tex)
+                except Exception as e:
+                    results=None
+                    print("❌ [extract tex ERROR]",e)
                 if results is not None:
 
                     fig1_file_path=os.path.join(folder_path, results['image_path'] )
