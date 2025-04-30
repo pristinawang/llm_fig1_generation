@@ -881,16 +881,19 @@ def extract_latex_info(latex_path):
     tex = TeX()
     try:
         tex.input(tex_str)
+        print('➡️ Parsing - try block')
         doc = tex.parse()
+        print('🚀 Parsing - try block done')
     except ColorError as ce:
         tex_str = re.sub(r'\\definecolor\{.*?\}\{HTML\}\{.*?\}', '', tex_str)
         tex.input(tex_str)
+        print('➡️ Parsing - color block')
         doc = tex.parse()
+        print('🚀 Parsing - color block done')
     except Exception as e:
-        
         print("❌ [Parse tex ERROR]",e)
         return None
-
+    print('⭐ Parsing - DONE')
     result = {}
     # --- Extract abstract node ---
     abstract_node = None
@@ -1139,8 +1142,11 @@ class BetterParsing:
 
 def find_main_tex(tex_files):
     for latex_path in tex_files:
-        with open(latex_path, 'r', encoding='utf-8') as f:
-            tex_str = f.read()
+        try:
+            with open(latex_path, 'r', encoding='utf-8') as f:
+                tex_str = f.read()
+        except Exception as e:
+            continue
         if r'\documentclass' in tex_str:
             return latex_path
     else:
