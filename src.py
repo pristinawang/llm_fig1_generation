@@ -37,7 +37,6 @@ def full_extraction(target_dict, latex_files_path, benchmark_dir_path, backup_di
         backup_db_path = os.path.join(backup_dir_path, backup_db_file_name)
 
         titles=return_paper_titles(year=year, venue=venue)
-        titles=titles[:100]
         paper_id_dict, not_found_titles = get_arxiv_id_dict(titles=titles, max_results=10, backup_db_path=backup_db_path)
         paper_id_dict=download_latex_files(paper_id_dict=paper_id_dict, save_dir_path=latex_files_path)
         success_extractions=extract_to_csv(paper_id_dict=paper_id_dict, latex_files_path=latex_files_path, csv_path=csv_path)
