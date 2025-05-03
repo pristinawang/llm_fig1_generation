@@ -141,6 +141,50 @@ def return_iclr_paper_titles(year: str):
         raise ValueError(f"This api version doesn't exist.")
 
 def return_cvpr_paper_titles(year: str):
+    if int(year) <= 2022:
+        return return_old_cvpr_paper_titles(year)
+    else:
+        return return_new_cvpr_paper_titles(year)
+
+def return_old_cvpr_paper_titles(year):
+    url = "https://openaccess.thecvf.com/CVPR"+year
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested year probably doesn't exist ({year}).")
+    soup = BeautifulSoup(response.text, 'html.parser')
+    # Extract all href attributes containing "?day="
+    hrefs = [a['href'] for a in soup.find_all('a', href=True) if '?day=' in a['href']]
+
+    # Extract the values after ?day=
+    days = [re.search(r'\?day=([^&]+)', href).group(1) for href in hrefs]
+    days_norm = [day.lower() for day in days]
+
+    if 'all' in days_norm:
+        all_id = days_norm.index('all')
+        days = [days[all_id]]
+    all_titles=[]
+    for day in days:
+        all_titles.extend(return_day_cvpr_titles(year, day))
+    return all_titles
+    
+def return_day_cvpr_titles(year, day):
+    # Replace with the actual URL of the CVPR page you're scraping
+    url = "https://openaccess.thecvf.com/CVPR"+year+"?day="+day
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Error while accessing the URL: {url}. The requested day probably doesn't exist ({day}).")
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find all paper title <a> tags inside <dt class="ptitle">
+    title_tags = soup.find_all('dt', class_='ptitle')
+    paper_titles = [dt.find('a').text.strip() for dt in title_tags if dt.find('a')]
+    return paper_titles
+
+def return_new_cvpr_paper_titles(year: str):
     url = "https://cvpr.thecvf.com/Conferences/"+year+"/AcceptedPapers"
     try:
         response = requests.get(url)
