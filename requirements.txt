@@ -10,4 +10,5 @@ thinc==8.2.5
 openreview-py==1.48.1
 tenacity==9.0.0 
 pandas==2.0.3
+Pebble==5.1.1
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
